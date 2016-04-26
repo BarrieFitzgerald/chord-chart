@@ -1,0 +1,156 @@
+
+library(plyr)
+library(dplyr)
+library(tidyr)
+library(migest)
+library(circlize)
+
+
+data.pull <- function(term, major) {
+        ## installing database connection and loading library
+        ifelse(!require(RODBC), install.packages("RODBC"), require(RODBC))
+        library(RODBC)
+        year <- as.numeric(substr(Sys.Date(), 1, 4))
+        titan.query <- paste0("select term, student_id, ftft_term, major_code from odi.student_term_details where term = '", 
+                              term, 
+                              "' and student_level_code = 'US'")
+        ## opening the connection to Titan to pull the data
+        data.connection <- odbcConnect("TITAN", uid = "DMUSER", pwd = "welcome1n", believeNRows=FALSE)
+        ## pulling the data
+        ftd <- sqlQuery(channel = data.connection, query = titan.query)
+        return(ftd)
+        ## closing the connection
+        close(data.connection)
+}
+
+
+
+grad.pull <- function(term) {
+        ## installing database connection and loading library
+        ifelse(!require(RODBC), install.packages("RODBC"), require(RODBC))
+        library(RODBC)
+        year <- as.numeric(substr(Sys.Date(), 1, 4))
+        titan.query <- paste0("select distinct dp.vsu_id as student_id, fg.term_code from banner_cube.fact_graduation fg join banner_cube.dim_person dp on dp.pidm = fg.pidm where term_code >= '", 
+                              term, 
+                              "' and term_code < '", 
+                              term, 
+                              "' + 100 and decision_code != 'DE' and student_level_code = 'US'")
+        ## opening the connection to Titan to pull the data
+        data.connection <- odbcConnect("TITAN", uid = "DMUSER", pwd = "welcome1n", believeNRows=FALSE)
+        ## pulling the data
+        ftd <- sqlQuery(channel = data.connection, query = titan.query)
+        return(ftd)
+        ## closing the connection
+        close(data.connection)
+}
+
+
+
+feeder.major.cord.chart <- function(term, majorcode) {
+        initial.data <- data.pull(term = term) %>%
+                #filter(FTFT_TERM == term) %>%
+                select(STUDENT_ID, 
+                       MAJOR_CODE) %>%
+                rename(initial = MAJOR_CODE)
+        
+        
+        next.data <- data.pull(term = term + 100) %>%
+                filter(FTFT_TERM == term) %>%
+                select(STUDENT_ID, 
+                       MAJOR_CODE) %>%
+                rename(changed = MAJOR_CODE)
+        
+        grad <- grad.pull(term = term) %>%
+                select(STUDENT_ID) %>%
+                filter(!duplicated(STUDENT_ID)) %>%
+                mutate(graduate = 1)
+        
+        
+        data <- initial.data %>%
+                left_join(next.data) %>%
+                left_join(grad) %>%
+                mutate(changed = as.character(changed), 
+                       changed1 = NA, 
+                       changed1 = ifelse(is.na(changed1) &
+                                                 !is.na(graduate), 
+                                         "Graduated", 
+                                         changed1), 
+                       changed1 = ifelse(is.na(changed1) &
+                                                 !is.na(changed),
+                                         changed, 
+                                         changed1), 
+                       changed1 = ifelse(is.na(changed1), 
+                                         "Not Enrolled", 
+                                         changed1), 
+                       changed = changed1) %>%
+                filter(initial == majorcode &
+                               changed != majorcode
+                       ) %>%
+                select(initial, 
+                       changed) %>%
+                group_by(initial, 
+                         changed) %>%
+                summarize(number = n())
+        
+        initial <- chordDiagramFromDataFrame(df = data, 
+                                             directional = 0)
+        return(initial)
+        circos.clear()
+}
+
+feeding.major.cord.chart <- function(term, majorcode) {
+        initial.data <- data.pull(term = term) %>%
+                #filter(FTFT_TERM == term) %>%
+                select(STUDENT_ID, 
+                       MAJOR_CODE) %>%
+                rename(initial = MAJOR_CODE)
+        
+        
+        next.data <- data.pull(term = term + 100) %>%
+                filter(FTFT_TERM == term) %>%
+                select(STUDENT_ID, 
+                       MAJOR_CODE) %>%
+                rename(changed = MAJOR_CODE)
+        
+        
+        grad <- grad.pull(term = 201408) %>%
+                select(STUDENT_ID) %>%
+                filter(!duplicated(STUDENT_ID)) %>%
+                mutate(graduate = 1)
+        
+        
+        data <- initial.data %>%
+                left_join(next.data) %>%
+                left_join(grad) %>%
+                mutate(changed = as.character(changed), 
+                       changed1 = NA, 
+                       changed1 = ifelse(is.na(changed1) &
+                                                 !is.na(graduate), 
+                                         "Graduated", 
+                                         changed1), 
+                       changed1 = ifelse(is.na(changed1) &
+                                                 !is.na(changed),
+                                         changed, 
+                                         changed1), 
+                       changed1 = ifelse(is.na(changed1), 
+                                         "Not Enrolled", 
+                                         changed1), 
+                       changed = changed1) %>%
+                filter(initial != majorcode &
+                               changed == majorcode) %>%
+                select(initial, 
+                       changed) %>%
+                group_by(initial, 
+                         changed) %>%
+                summarize(number = n())
+        
+        next.year <- chordDiagramFromDataFrame(df = data, 
+                                               directional = 0)
+        return(next.year)
+        circos.clear()
+}
+
+feeder.major.cord.chart(term = 201408, majorcode = "POS")
+feeding.major.cord.chart(term = 201408, majorcode = "POS")
+
+
